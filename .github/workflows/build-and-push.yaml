@@ -16,11 +16,14 @@ jobs:
     environment: tech-builds
     env:
       DOCKER_IMAGE_REGISTRY: makerdao/chief-keeper
-      DOCKER_IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    - name: Set Docker image tag
+      id: image_tag
+      run: echo "tag=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
     - name: Login to Docker Hub
       uses: docker/login-action@v3
@@ -32,8 +35,8 @@ jobs:
       id: build-image
       run: |
         docker build -t ${{ env.DOCKER_IMAGE_REGISTRY }} .
-        docker tag ${{ env.DOCKER_IMAGE_REGISTRY }} ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ env.DOCKER_IMAGE_TAG }}
-        docker push ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ env.DOCKER_IMAGE_TAG }}
+        docker tag ${{ env.DOCKER_IMAGE_REGISTRY }} ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ steps.image_tag.outputs.tag }}
+        docker push ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ steps.image_tag.outputs.tag }}
 
     - name: Display image reference
-      run: echo "Pushed image ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ env.DOCKER_IMAGE_TAG }}"
+      run: echo "Pushed image ${{ env.DOCKER_IMAGE_REGISTRY }}:${{ steps.image_tag.outputs.tag }}"
