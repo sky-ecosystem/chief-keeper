@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-buster
+FROM python:3.9-bullseye
 
 # Add user and group for running the application
 RUN groupadd -r keeper && useradd -d /home/keeper -m --no-log-init -r -g keeper keeper && \
@@ -24,4 +24,3 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Run run-chief-keeper.sh when the container launches
 CMD ["./run-chief-keeper.sh"]
-
