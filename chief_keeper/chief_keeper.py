@@ -122,16 +122,7 @@ class ChiefKeeper:
         # register_keys(self.web3, self.arguments.eth_key)
         self.our_address = Address(self.arguments.eth_from)
 
-        if self.arguments.dss_deployment_file:
-            self.dss = DssDeployment.from_json(
-                web3=self.web3,
-                conf=open(self.arguments.dss_deployment_file, "r").read(),
-            )
-        else:
-            self.dss = DssDeployment.from_network(
-                web3=self.web3, network=self.arguments.network
-            )
-            self.logger.info(f"DS-Chief: {self.dss.ds_chief.address}")
+        self._post_node_connection_setup()
         self.deployment_block = self.arguments.chief_deployment_block
 
         self.max_errors = self.arguments.max_errors
@@ -169,6 +160,28 @@ class ChiefKeeper:
             self.arguments.rpc_backup_url, self.arguments.rpc_backup_timeout, "backup"
         )
 
+    def _handle_rpc_disconnect(self):
+        """Attempt to fail over when the active RPC endpoint becomes unavailable."""
+        self.logger.warning(
+            f"Lost connection to the {self.node_type or 'unknown'} Ethereum node; attempting failover."
+        )
+
+        if self.node_type == "primary":
+            reconnect_order = [self._connect_to_backup_node, self._connect_to_primary_node]
+        else:
+            reconnect_order = [self._connect_to_primary_node, self._connect_to_backup_node]
+
+        for reconnect in reconnect_order:
+            if reconnect():
+                self.logger.info(f"Failover successful; now connected to the {self.node_type} node.")
+                self._post_node_connection_setup()
+                return True
+
+        self.logger.critical(
+            "Error: Couldn't reconnect to either the primary or backup Ethereum nodes."
+        )
+        return False
+
     def _connect_to_node(self, rpc_url, rpc_timeout, node_type):
         """Connect to an Ethereum node"""
         try:
@@ -195,6 +208,29 @@ class ChiefKeeper:
             node_hostname = urlparse(self.web3.provider.endpoint_uri).hostname
             self.logger.info(f"Connected to Ethereum node at {node_hostname}")
             return True
+
+    def _post_node_connection_setup(self):
+        """Ensure deployment and runtime components use the active Web3 connection."""
+        self._load_dss_deployment()
+        if hasattr(self, "database"):
+            self.database.web3 = self.web3
+            self.database.dss = self.dss
+        if hasattr(self, "lifecycle") and self.lifecycle is not None:
+            self.lifecycle.web3 = self.web3
+
+    def _load_dss_deployment(self):
+        if self.arguments.dss_deployment_file:
+            with open(self.arguments.dss_deployment_file, "r") as deployment_file:
+                conf = deployment_file.read()
+            self.dss = DssDeployment.from_json(
+                web3=self.web3,
+                conf=conf,
+            )
+        else:
+            self.dss = DssDeployment.from_network(
+                web3=self.web3, network=self.arguments.network
+            )
+            self.logger.info(f"DS-Chief: {self.dss.ds_chief.address}")
 
     def main(self):
         """Initialize the lifecycle and enter into the Keeper Lifecycle controller.
@@ -262,8 +298,12 @@ class ChiefKeeper:
         This is the entrypoint to the Keeper's monitoring logic
         """
         try:
-            isConnected = self.web3.isConnected()
-            self.logger.info(f'web3 isConnected: {isConnected}')
+            if not self.web3.isConnected():
+                if not self._handle_rpc_disconnect():
+                    self.errors += 1
+                    return
+
+            self.logger.info(f'web3 isConnected: {self.web3.isConnected()}')
 
             if self.errors >= self.max_errors:
                 self.lifecycle.terminate()
